@@ -45,15 +45,12 @@ class UnCoRdv2:
         Google Neural Machine Translation
         returns question's graph sequence
         """
-        with open('train_questions_none.graph') as f:
-            graph_txt = f.read()
-        graph_text_list = graph_txt.split('\n')
         ques_text = question['question']
         ques_text = re.sub(r'\?', '', ques_text)
         tokens = ques_text.split()
         graph_text = self.translator.translate_batch([tokens])
 
-        print(' '.join(graph_text[0].hypotheses[0]))
+        #print(' '.join(graph_text[0].hypotheses[0]))
 
         return ' '.join(graph_text[0].hypotheses[0])
 
@@ -339,7 +336,7 @@ class UnCoRdv2:
                 continue
             # print(f'Checking object {p_key}')
             prediction = get_prediction(scene, boxes, p_key, self.answer_vocab, self.tokenizer,
-                                        self.estimator, self.transform)
+                                        self.estimator, self.transform, device=self.device)
 
             # self.visualize_results(scene, boxes, prediction)
 
@@ -359,7 +356,7 @@ class UnCoRdv2:
 
         cur_node = self.list_of_nodes[nid]
         answer = get_prediction(scene, [boxes], cur_node.F, self.answer_vocab, self.tokenizer,
-                                self.estimator, self.transform)
+                                self.estimator, self.transform, device=self.device)
         success = True
 
         # self.visualize_results(scene, boxes, answer)
@@ -378,9 +375,9 @@ class UnCoRdv2:
             # print('same check')
             same_p = rel.split()[1]
             cur_obj_prediction = get_prediction(scene, [cur_box], same_p, self.answer_vocab, self.tokenizer,
-                                                self.estimator, self.transform)
+                                                self.estimator, self.transform, device=self.device)
             obj_prediction = get_prediction(scene, [box], same_p, self.answer_vocab, self.tokenizer,
-                                            self.estimator, self.transform)
+                                            self.estimator, self.transform, device=self.device)
 
             if cur_obj_prediction == obj_prediction:
                 success = True
@@ -389,7 +386,7 @@ class UnCoRdv2:
         else:
             boxes = [cur_box, box]
             prediction = get_prediction(scene, boxes, rel, self.answer_vocab, self.tokenizer,
-                                        self.estimator, self.transform)
+                                        self.estimator, self.transform, device=self.device)
 
             if prediction == 'yes':
                 success, answer = True, 'yes'

@@ -16,6 +16,9 @@ def load_vlbert(ckpt_path, device):
 
     # get model
     model = eval(config.MODULE)(config)
+    if device == "cuda":
+       torch.cuda.set_device(int(config.GPUS))
+       model.cuda()
 
     if config.NETWORK.PARTIAL_PRETRAIN != "":
         pretrain_state_dict = torch.load(config.NETWORK.PARTIAL_PRETRAIN, map_location=device)['state_dict']
@@ -48,7 +51,7 @@ def load_vlbert(ckpt_path, device):
     return model, transform, tokenizer
 
 
-def get_prediction(image, boxes, question, answer_vocab, tokenizer, model, transform=None):
+def get_prediction(image, boxes, question, answer_vocab, tokenizer, model, transform=None, device="cpu"):
 
     w0, h0 = image.size
     im_info = torch.tensor([w0, h0, 1.0, 1.0])
@@ -76,10 +79,10 @@ def get_prediction(image, boxes, question, answer_vocab, tokenizer, model, trans
     out['question'] = clip_pad_1d(q_ids, max_question_length, pad=0)
     out['im_info'] = torch.as_tensor(im_info)
 
-    image = torch.unsqueeze(out['image'], dim=0)
-    boxes = torch.unsqueeze(out['boxes'], dim=0)
-    im_info = torch.unsqueeze(im_info, dim=0)
-    q_ids = torch.unsqueeze(out['question'], dim=0)
+    image = torch.unsqueeze(out['image'], dim=0).to(device)
+    boxes = torch.unsqueeze(out['boxes'], dim=0).to(device)
+    im_info = torch.unsqueeze(im_info, dim=0).to(device)
+    q_ids = torch.unsqueeze(out['question'], dim=0).to(device)
     model.eval()
     output = model(image=image, boxes=boxes, im_info=im_info, question=q_ids)
     answer_id = output['label_logits'].argmax(dim=1).detach().cpu().tolist()
