@@ -4,6 +4,8 @@ import re
 import ctranslate2
 import torch
 from PIL import Image, ImageDraw
+import numpy as np
+import cv2
 
 from estimators.object_detection import get_detection_model, get_transform
 from vlbert.vqa.get_estimator import load_vlbert, get_prediction
@@ -28,17 +30,29 @@ class Node:
 
 class UnCoRdv2:
 
-    def __init__(self, device):
+    def __init__(self, device, answer_vocab_file, properties_file):
         self.list_of_nodes = {}
+        self.visited_nodes = {}
         self.translator = ctranslate2.Translator("ende_ctranslate2/", device="cpu")
         self.detector = get_detection_model(2)
         self.detector.load_state_dict(torch.load('./estimators/object_detection', map_location="cpu"))
         self.device = device
         self.estimator, self.transform, self.tokenizer = load_vlbert(ckpt_path='./vlbert/model/pretrained_model/vl'
                                                                                '-bert-base-prec.model', device=device)
-        self.answer_vocab = ('gray', 'red', 'blue', 'green', 'brown', 'purple',
-                             'cyan', 'yellow', 'small', 'large', 'rubber', 'metal',
-                             'cube', 'sphere', 'cylinder', 'yes', 'no', '<unk>')
+        self.answer_vocab = []
+        with open(answer_vocab_file, 'r') as f:
+            for line in f:
+                self.answer_vocab.append(line.strip())
+
+        self.properties = dict()
+        with open(properties_file, 'r') as f:
+            for line in f:
+                data = line.strip().split()
+                prop_name = data[0]
+                prop_values = data[1:]
+                self.properties[prop_name] = prop_values
+
+        self.num_vlbert_calls = 0
 
     def _nmt_seq2seq(self, question):
         """
@@ -50,7 +64,7 @@ class UnCoRdv2:
         tokens = ques_text.split()
         graph_text = self.translator.translate_batch([tokens])
 
-        #print(' '.join(graph_text[0].hypotheses[0]))
+        print(' '.join(graph_text[0].hypotheses[0]))
 
         return ' '.join(graph_text[0].hypotheses[0])
 
@@ -61,10 +75,6 @@ class UnCoRdv2:
         Returns list of graph nodes
         built from graph_txt sequence
         """
-        COLORS = ['gray', 'red', 'blue', 'green', 'brown', 'purple', 'cyan', 'yellow']
-        SIZES = ['small', 'large']
-        MATERIALS = ['rubber', 'metal']
-        SHAPES = ['cube', 'sphere', 'cylinder']
         nodes_list = [node.strip() for node in graph_txt.split('<NewNode>')[1:]]
         for nid in range(len(nodes_list)):
             node_txt = nodes_list[nid].split()
@@ -110,16 +120,12 @@ class UnCoRdv2:
                 p_text[-1] = p_text[-1].split('<')[0]
                 properties = [p.strip() for p in p_text]
                 for p in properties:
-                    if p in COLORS:
-                        node.p['color'] = p
-                    elif p in SIZES:
-                        node.p['size'] = p
-                    elif p in MATERIALS:
-                        node.p['material'] = p
-                    elif p in SHAPES:
-                        node.p['shape'] = p
+                    for p_key in self.properties.keys():
+                        if p in self.properties[p_key]:
+                            node.p[p_key] = p
+                            break
 
-            # print(node.p)
+            print(node.p)
 
             # findig F
             if "<F>" in node_txt:
@@ -161,21 +167,25 @@ class UnCoRdv2:
         if self.list_of_nodes:
             self.list_of_nodes.clear()
 
+        if self.visited_nodes:
+            self.visited_nodes.clear()
+
+        self.num_vlbert_calls = 0
+
         img_id = question['image_index']
 
         graph_txt = self._nmt_seq2seq(question)
         self._build_graph(graph_txt)
         objects, scene = self._detect_objects(img_dir, img_id)
         answer = self._get_answer(1, objects, scene, candidate_objs=objects)
+        #self.visualize_graph(scene)
 
         return answer[1]
 
-    def _get_answer(self, nid, objects, scene, visited_nodes=None, candidate_objs=None):
+    def _get_answer(self, nid, objects, scene, candidate_objs=None):
         """
         DFS Traversal (recursive)
         """
-        if not visited_nodes:
-            visited_nodes = {}
         # print(f'Checking node {nid}')
         answer = 'no'
         success = False
@@ -184,7 +194,7 @@ class UnCoRdv2:
         if cur_node.nodeType == 'superNode':
             candidate_objs.clear()
             for node in cur_node.nodes:
-                for vis_node in visited_nodes[int(node)]:
+                for vis_node in self.visited_nodes[int(node)]:
                     if vis_node not in candidate_objs:
                         candidate_objs.append(vis_node)
 
@@ -200,7 +210,7 @@ class UnCoRdv2:
             success, answer = True, 'yes'
         else:
             success, answer = False, 'no'
-        visited_nodes[nid] = cur_objects
+        self.visited_nodes[nid] = cur_objects
 
         # print(f'Current objects: {cur_objects}')
 
@@ -209,7 +219,7 @@ class UnCoRdv2:
                 cur_object = cur_objects[0]
                 valid_objs = []
                 for d_id in cur_node.d_nodes.keys():
-                    if int(d_id) not in visited_nodes:
+                    if int(d_id) not in self.visited_nodes:
                         rel = cur_node.d_nodes[d_id]
                         for obj in objects:
                             obj_id = objects.index(obj)
@@ -225,7 +235,7 @@ class UnCoRdv2:
 
                         # print(f'Objects that are in suitable relation with node {nid}')
                         # print(valid_objs)
-                        success, answer = self._get_answer(int(d_id), objects, scene, visited_nodes,
+                        success, answer = self._get_answer(int(d_id), objects, scene,
                                                            valid_objs)
 
             elif cur_node.p_node:
@@ -234,7 +244,7 @@ class UnCoRdv2:
                 objects_to_remove = []
                 for p_id in cur_node.p_node.keys():
                     # print(f'parent {p_id}')
-                    if int(p_id) not in visited_nodes:
+                    if int(p_id) not in self.visited_nodes:
                         flag = True
                         rel = cur_node.p_node[p_id]
                         for cur_object in cur_objects:
@@ -262,8 +272,8 @@ class UnCoRdv2:
 
                 if not flag:
                     for i in self.list_of_nodes.keys():
-                        if i not in visited_nodes:
-                            success, answer = self._get_answer(i, objects, scene, visited_nodes, objects)
+                        if i not in self.visited_nodes:
+                            success, answer = self._get_answer(i, objects, scene, objects)
                             return success, answer
                 else:
                     cur_objects = [obj for obj in cur_objects if obj not in objects_to_remove]
@@ -275,8 +285,8 @@ class UnCoRdv2:
 
         else:
             for i in self.list_of_nodes.keys():
-                if i not in visited_nodes:
-                    success, answer = self._get_answer(i, objects, scene, visited_nodes, objects)
+                if i not in self.visited_nodes:
+                    success, answer = self._get_answer(i, objects, scene, objects)
                     return success, answer
 
         if cur_node.F:
@@ -296,29 +306,29 @@ class UnCoRdv2:
             if low_node:
                 # print('lower_node')
                 # print(visited_nodes.keys())
-                if int(low_node) in visited_nodes.keys():
+                if int(low_node) in self.visited_nodes.keys():
                     # print('getting answer')
                     # print(visited_nodes[2])
                     if cur_objects:
-                        success, answer = self._compare_numbers(vis_obj=visited_nodes[int(low_node)],
+                        success, answer = self._compare_numbers(vis_obj=self.visited_nodes[int(low_node)],
                                                                 cur_obj=cur_objects)
                     else:
-                        success, answer = self._compare_numbers(vis_obj=visited_nodes[int(low_node)])
+                        success, answer = self._compare_numbers(vis_obj=self.visited_nodes[int(low_node)])
             elif high_node:
                 # print('higher_node')
-                if int(high_node) in visited_nodes.keys():
+                if int(high_node) in self.visited_nodes.keys():
                     if cur_objects:
-                        success, answer = self._compare_numbers(vis_obj=visited_nodes[int(high_node)], c_type='high',
+                        success, answer = self._compare_numbers(vis_obj=self.visited_nodes[int(high_node)], c_type='high',
                                                                 cur_obj=cur_objects)
                     else:
-                        success, answer = self._compare_numbers(vis_obj=visited_nodes[int(high_node)], c_type='high')
+                        success, answer = self._compare_numbers(vis_obj=self.visited_nodes[int(high_node)], c_type='high')
             else:
-                if int(same_node) in visited_nodes.keys():
+                if int(same_node) in self.visited_nodes.keys():
                     if cur_objects:
-                        success, answer = self._compare_numbers(vis_obj=visited_nodes[int(same_node)], c_type='same',
+                        success, answer = self._compare_numbers(vis_obj=self.visited_nodes[int(same_node)], c_type='same',
                                                                 cur_obj=cur_objects)
                     else:
-                        success, answer = self._compare_numbers(vis_obj=visited_nodes[int(same_node)], c_type='same')
+                        success, answer = self._compare_numbers(vis_obj=self.visited_nodes[int(same_node)], c_type='same')
 
         return success, answer
 
@@ -337,6 +347,7 @@ class UnCoRdv2:
             # print(f'Checking object {p_key}')
             prediction = get_prediction(scene, boxes, p_key, self.answer_vocab, self.tokenizer,
                                         self.estimator, self.transform, device=self.device)
+            self.num_vlbert_calls += 1
 
             # self.visualize_results(scene, boxes, prediction)
 
@@ -357,6 +368,7 @@ class UnCoRdv2:
         cur_node = self.list_of_nodes[nid]
         answer = get_prediction(scene, [boxes], cur_node.F, self.answer_vocab, self.tokenizer,
                                 self.estimator, self.transform, device=self.device)
+        self.num_vlbert_calls += 1
         success = True
 
         # self.visualize_results(scene, boxes, answer)
@@ -378,6 +390,7 @@ class UnCoRdv2:
                                                 self.estimator, self.transform, device=self.device)
             obj_prediction = get_prediction(scene, [box], same_p, self.answer_vocab, self.tokenizer,
                                             self.estimator, self.transform, device=self.device)
+            self.num_vlbert_calls += 1
 
             if cur_obj_prediction == obj_prediction:
                 success = True
@@ -387,6 +400,8 @@ class UnCoRdv2:
             boxes = [cur_box, box]
             prediction = get_prediction(scene, boxes, rel, self.answer_vocab, self.tokenizer,
                                         self.estimator, self.transform, device=self.device)
+
+            self.num_vlbert_calls += 1
 
             if prediction == 'yes':
                 success, answer = True, 'yes'
@@ -468,3 +483,22 @@ class UnCoRdv2:
             img.rectangle(box, outline=color)
             img.text(((box[2] + box[0]) / 2, (box[3] + box[1]) / 2), answer)
         temp.show()
+
+    def visualize_graph(self, image):
+        if not self.visited_nodes:
+            print("No question graph built. Use get_answer method.")
+            return
+        temp = image.copy()
+        img = ImageDraw.Draw(temp)
+        print(self.visited_nodes)
+        for nid in self.visited_nodes.keys():
+            node = self.list_of_nodes[nid]
+            if self.visited_nodes[int(nid)]:
+               for obj in self.visited_nodes[int(nid)]:
+                   box = obj['box']
+                   img.rectangle(box)
+                   img.text(((box[2] + box[0]) / 2, (box[3] + box[1]) / 2), f'Node {nid}')
+                   for i, prop in enumerate(node.p.keys()):
+                       img.text(((box[2] + box[0]) / 2, (box[3] + box[1]) / 2 + 10*(i+1)), f'{prop}: {node.p[prop]}')
+        temp.show()
+

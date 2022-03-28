@@ -27,13 +27,15 @@ def get_questions_and_answers(questions_file, num_questions=None, test=False, sh
     return sample, answers
 
 
-def get_question_by_idx(questions_file, ques_id):
+def get_question_by_idx(questions_file, ques_id, test=False):
     with open(questions_file, 'r') as f:
         q_info = json.load(f)
 
     q_info = q_info['questions']
 
     question = q_info[ques_id]
-    answer = question['answer']
+    answer = None
+    if not test:
+       answer = question['answer']
 
     return question, answer

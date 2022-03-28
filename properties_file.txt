@@ -1,0 +1,4 @@
+color gray red blue green brown purple cyan yellow
+size small large
+material metal rubber
+shape cube cylinder sphere
