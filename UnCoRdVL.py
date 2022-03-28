@@ -64,7 +64,7 @@ class UnCoRdv2:
         tokens = ques_text.split()
         graph_text = self.translator.translate_batch([tokens])
 
-        print(' '.join(graph_text[0].hypotheses[0]))
+        #print(' '.join(graph_text[0].hypotheses[0]))
 
         return ' '.join(graph_text[0].hypotheses[0])
 
@@ -125,7 +125,7 @@ class UnCoRdv2:
                             node.p[p_key] = p
                             break
 
-            print(node.p)
+            #print(node.p)
 
             # findig F
             if "<F>" in node_txt:
