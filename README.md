@@ -1,5 +1,7 @@
 # UnCoRd-VL
 
+![text](./model_pic/model2v.png)
+
 ## Environment preparation
 Run the commands below.
 ```
