@@ -5,7 +5,7 @@ Run the commands below.
 ```
 git clone https://github.com/chrissark/UnCoRd-VL
 ```
-1. anaconda environment:
+1. Anaconda environment:
 
    ```
    conda create env --name uncord-vl
