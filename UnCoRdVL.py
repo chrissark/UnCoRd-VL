@@ -64,7 +64,7 @@ class UnCoRdv2:
         tokens = ques_text.split()
         graph_text = self.translator.translate_batch([tokens])
 
-        #print(' '.join(graph_text[0].hypotheses[0]))
+        print(' '.join(graph_text[0].hypotheses[0]))
 
         return ' '.join(graph_text[0].hypotheses[0])
 
@@ -79,7 +79,6 @@ class UnCoRdv2:
         for nid in range(len(nodes_list)):
             node_txt = nodes_list[nid].split()
             node = Node(nid + 1)
-            # define object
             c = node_txt[1]
             node.p['shape'] = c
             # print(node_txt)
@@ -178,7 +177,7 @@ class UnCoRdv2:
         self._build_graph(graph_txt)
         objects, scene = self._detect_objects(img_dir, img_id)
         answer = self._get_answer(1, objects, scene, candidate_objs=objects)
-        #self.visualize_graph(scene)
+        self.visualize_graph(scene)
 
         return answer[1]
 
@@ -349,7 +348,7 @@ class UnCoRdv2:
                                         self.estimator, self.transform, device=self.device)
             self.num_vlbert_calls += 1
 
-            # self.visualize_results(scene, boxes, prediction)
+            self.visualize_results(scene, boxes, prediction)
 
             if prediction == cur_node.p[p_key]:
                 continue
@@ -371,7 +370,7 @@ class UnCoRdv2:
         self.num_vlbert_calls += 1
         success = True
 
-        # self.visualize_results(scene, boxes, answer)
+        self.visualize_results(scene, boxes, answer)
 
         return success, answer
 
@@ -395,7 +394,9 @@ class UnCoRdv2:
             if cur_obj_prediction == obj_prediction:
                 success = True
                 answer = 'yes'
-            # self.visualize_results(scene, boxes, 'same' + same_p)
+                self.visualize_results(scene, boxes, 'same ' + same_p)
+            else:
+                self.visualize_results(scene, boxes, 'not same ' + same_p)
         else:
             boxes = [cur_box, box]
             prediction = get_prediction(scene, boxes, rel, self.answer_vocab, self.tokenizer,
@@ -406,7 +407,7 @@ class UnCoRdv2:
             if prediction == 'yes':
                 success, answer = True, 'yes'
 
-            # self.visualize_results(scene, boxes, prediction)
+            self.visualize_results(scene, boxes, rel +'? ' + prediction)
         return success, answer
 
     def _detect_objects(self, img_dir, img_id):
